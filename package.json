@@ -1,0 +1,14 @@
+{
+  "name": "surfing-sense-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension for exporting tabs with AI-powered features",
+  "main": "popup.js",
+  "scripts": {
+    "build": "yarn install"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "keywords": ["chrome-extension", "tabs", "ai", "transformers"],
+  "author": "",
+  "license": "ISC"
+}
