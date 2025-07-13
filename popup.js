@@ -3,19 +3,17 @@ document.addEventListener('DOMContentLoaded', function() {
   const exportCurrentBtn = document.getElementById('exportCurrentWindow');
   const exportAllBtn = document.getElementById('exportAllWindows');
   const viewSavedBtn = document.getElementById('viewSavedExports');
+  const resetBtn = document.getElementById('resetData');
   const statusDiv = document.getElementById('status');
 
   exportCurrentBtn.addEventListener('click', () => exportTabs(false));
   exportAllBtn.addEventListener('click', () => exportTabs(true));
   viewSavedBtn.addEventListener('click', showSavedExports);
+  resetBtn.addEventListener('click', resetAllData);
 
-  function getSelectedFormat() {
-    const selectedRadio = document.querySelector('input[name="format"]:checked');
-    return selectedRadio ? selectedRadio.value : 'simple';
-  }
 
-  function getSaveToIndexedDB() {
-    const checkbox = document.getElementById('saveToIndexedDB');
+  function getDownloadFile() {
+    const checkbox = document.getElementById('downloadFile');
     return checkbox ? checkbox.checked : false;
   }
 
@@ -46,10 +44,20 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       seen.add(tab.url);
 
-      // Skip if URL matches auth/login patterns
       const url = tab.url.toLowerCase();
       const title = tab.title.toLowerCase();
 
+      // Skip chrome:// and chrome-extension:// URLs
+      if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+        return false;
+      }
+
+      // Skip Google search URLs and Stack Overflow
+      if (url.includes('google.com/search') || url.includes('stackoverflow.com')) {
+        return false;
+      }
+
+      // Skip if URL matches auth/login patterns
       for (const pattern of authPatterns) {
         if (pattern.test(url) || pattern.test(title)) {
           return false;
@@ -85,60 +93,25 @@ document.addEventListener('DOMContentLoaded', function() {
     };
   }
 
-  function formatTabs(tabs, format) {
+  function formatTabs(tabs) {
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
-
-    switch (format) {
-      case 'markdown':
-        const content = tabs.map(tab => {
-          const tags = tab.contentTags?.tags?.length > 0 ? ` #${tab.contentTags.tags.join(' #')}` : '';
-          const categories = tab.contentTags?.categories?.length > 0 ? ` [${tab.contentTags.categories.join(', ')}]` : '';
-          const contentTags = tab.contentTags;
-          let metaInfo = '';
-
-          if (contentTags) {
-            const metaParts = [];
-            if (contentTags.description) metaParts.push(`"${contentTags.description.substring(0, 100)}..."`);
-            if (contentTags.author) metaParts.push(`by ${contentTags.author}`);
-            if (contentTags.publishedDate) metaParts.push(`published ${contentTags.publishedDate}`);
-            if (metaParts.length > 0) metaInfo = `\n  > ${metaParts.join(' | ')}`;
-          }
-
-          return `- [${tab.title}](${tab.url})${categories}${tags}${metaInfo}`;
-        }).join('\n');
-        return {
-          content: `# Chrome Tabs Export - ${new Date().toLocaleString()}\n\n${content}`,
-          filename: `chrome-tabs-${timestamp}.md`
-        };
-
-      case 'json':
-        const jsonData = {
-          exportDate: new Date().toISOString(),
-          tabs: tabs.map(tab => ({
-            title: tab.title,
-            url: tab.url,
-            windowId: tab.windowId,
-            index: tab.index,
-            active: tab.active,
-            pinned: tab.pinned,
-            contentTags: tab.contentTags || null
-          }))
-        };
-        return {
-          content: JSON.stringify(jsonData, null, 2),
-          filename: `chrome-tabs-${timestamp}.json`
-        };
-
-      default: // simple
-        const simpleContent = tabs.map(tab => {
-          const categories = tab.contentTags?.categories?.length > 0 ? ` [${tab.contentTags.categories.join(', ')}]` : '';
-          return `${tab.title} - ${tab.url}${categories}`;
-        }).join('\n');
-        return {
-          content: `Chrome Tabs Export - ${new Date().toLocaleString()}\n\n${simpleContent}`,
-          filename: `chrome-tabs-${timestamp}.txt`
-        };
-    }
+    
+    const jsonData = {
+      exportDate: new Date().toISOString(),
+      tabs: tabs.map(tab => ({
+        title: tab.title,
+        url: tab.url,
+        windowId: tab.windowId,
+        index: tab.index,
+        active: tab.active,
+        pinned: tab.pinned,
+        contentTags: tab.contentTags || null
+      }))
+    };
+    return {
+      content: JSON.stringify(jsonData, null, 2),
+      filename: `fomo-tabs-${timestamp}.json`
+    };
   }
 
   function showStatus(message, isError = false) {
@@ -166,9 +139,7 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
 
-        const format = getSelectedFormat();
-        const saveToIndexedDB = getSaveToIndexedDB();
-        const exportType = allWindows ? 'all' : 'current';
+        const downloadFile = getDownloadFile();
 
         // Filter tabs to remove duplicates and auth pages
         const filterResult = filterTabs(tabs);
@@ -191,34 +162,31 @@ document.addEventListener('DOMContentLoaded', function() {
             showStatus('Proceeding without content tags');
           }
 
-          // Save to IndexedDB if requested
-          if (saveToIndexedDB) {
-            const exportId = await tabStorage.saveTabExport(tabsToExport, format, exportType);
-            showStatus(`Saved ${tabsToExport.length} tabs to local storage (ID: ${exportId})`);
+          // Always save to IndexedDB
+          const results = await tabStorage.saveUrls(tabsToExport, { append: true });
+          
+          // Download file if requested
+          if (downloadFile) {
+            const { content, filename } = formatTabs(tabsToExport);
+            const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            chrome.downloads.download({
+              url: url,
+              filename: filename,
+              saveAs: true
+            }, () => {
+              if (chrome.runtime.lastError) {
+                showStatus(`Download failed: ${chrome.runtime.lastError.message}`, true);
+              } else {
+                showStatus(`Saved ${results.saved} new URLs, updated ${results.updated} existing (${results.errors.length} errors) & downloaded file`);
+              }
+
+              // Clean up the blob URL
+              URL.revokeObjectURL(url);
+            });
+          } else {
+            showStatus(`Saved ${results.saved} new URLs, updated ${results.updated} existing (${results.errors.length} errors)`);
           }
-
-          // Also create downloadable file
-          const { content, filename } = formatTabs(tabsToExport, format);
-          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          console.log('content filename', content, filename);
-          chrome.downloads.download({
-            url: url,
-            filename: filename,
-            saveAs: true
-          }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-              showStatus(`Download failed: ${chrome.runtime.lastError.message}`, true);
-            } else {
-              const message = saveToIndexedDB ?
-                `Exported ${tabs.length} tabs (saved & downloaded)` :
-                `Exported ${tabs.length} tabs successfully!`;
-              showStatus(message);
-            }
-
-            // Clean up the blob URL
-            URL.revokeObjectURL(url);
-          });
         } catch (dbError) {
           showStatus(`Database error: ${dbError.message}`, true);
         }
@@ -230,53 +198,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function showSavedExports() {
     try {
-      const exports = await tabStorage.getAllExports();
-
-      if (exports.length === 0) {
-        showStatus('No saved exports found');
-        return;
-      }
-
-      // Create a simple list view
-      const exportsList = exports.map(exp => {
-        const date = new Date(exp.timestamp).toLocaleString();
-        return `${date} - ${exp.tabCount} tabs (${exp.format}, ${exp.exportType})`;
-      }).join('\n');
-
-      // For now, show in a simple alert - could be enhanced with a proper modal
-      const selectedIndex = prompt(`Saved Exports:\n\n${exportsList}\n\nEnter number (1-${exports.length}) to download, or cancel:`);
-
-      if (selectedIndex && !isNaN(selectedIndex)) {
-        const index = parseInt(selectedIndex) - 1;
-        if (index >= 0 && index < exports.length) {
-          await downloadSavedExport(exports[index]);
-        }
-      }
+      // Open tab-viewer in a new tab that reads from IndexedDB
+      chrome.tabs.create({
+        url: chrome.runtime.getURL('tab-viewer.html')
+      });
     } catch (error) {
-      showStatus(`Error loading saved exports: ${error.message}`, true);
+      showStatus(`Error opening tab viewer: ${error.message}`, true);
     }
   }
 
-  async function downloadSavedExport(exportData) {
+  async function resetAllData() {
+    // Show confirmation dialog
+    const confirmed = confirm(
+      'Are you sure you want to reset all saved data?\n\n' +
+      'This will permanently delete all saved URLs and cannot be undone.\n\n' +
+      'Click OK to proceed or Cancel to abort.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
-      const { content, filename } = tabStorage.formatExportForDownload(exportData);
-      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      console.log(content, filename)
-      chrome.downloads.download({
-        url: url,
-        filename: filename,
-        saveAs: true
-      }, (downloadId) => {
-        if (chrome.runtime.lastError) {
-          showStatus(`Download failed: ${chrome.runtime.lastError.message}`, true);
-        } else {
-          showStatus('Saved export downloaded successfully!');
-        }
-        URL.revokeObjectURL(url);
-      });
+      showStatus('Resetting all data...');
+      
+      // Initialize storage if needed and clear all URLs
+      await tabStorage.init();
+      await tabStorage.clearAllUrls();
+      
+      showStatus('All data has been reset successfully');
     } catch (error) {
-      showStatus(`Error downloading saved export: ${error.message}`, true);
+      console.error('Error resetting data:', error);
+      showStatus(`Error resetting data: ${error.message}`, true);
     }
   }
 });

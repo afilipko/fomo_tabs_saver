@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tab Exporter with AI Tagging",
-  "description": "Export Chrome tabs with smart filtering and AI-powered content tagging",
-  "version": "2.0",
+  "name": "Fomo Tabs Saver",
+  "description": "Save and organize Chrome tabs with smart filtering and AI-powered content tagging",
+  "version": "3.0",
   "permissions": [
     "tabs",
     "downloads",
@@ -22,11 +22,17 @@
       "all_frames": false
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["tab-viewer.html", "tab-viewer.js", "indexeddb.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Export Tabs with AI Tags"
+    "default_title": "Fomo Tabs Saver"
   }
 }

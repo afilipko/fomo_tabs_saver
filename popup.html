@@ -29,12 +29,21 @@
       background: #3367d6;
     }
 
-    .format-options, .action-options {
+    .reset-btn {
+      background: #dc3545 !important;
+      margin-top: 8px;
+    }
+
+    .reset-btn:hover {
+      background: #c82333 !important;
+    }
+
+    .action-options {
       margin: 16px 0;
       text-align: left;
     }
 
-    .format-options label, .action-options label {
+    .action-options label {
       display: block;
       margin: 8px 0;
       cursor: pointer;
@@ -62,33 +71,20 @@
 </head>
 <body>
   <div class="container">
-    <h3>Tab Exporter</h3>
+    <h3>Fomo Tabs Saver</h3>
 
-    <div class="format-options">
-      <label>
-        <input type="radio" name="format" value="simple" checked>
-        Simple (Title - URL)
-      </label>
-      <label>
-        <input type="radio" name="format" value="markdown">
-        Markdown Links
-      </label>
-      <label>
-        <input type="radio" name="format" value="json">
-        JSON Format
-      </label>
-    </div>
 
     <div class="action-options">
       <label>
-        <input type="checkbox" id="saveToIndexedDB" checked>
-        Save to local storage
+        <input type="checkbox" id="downloadFile" checked>
+        Also download JSON file
       </label>
     </div>
 
-    <button id="exportCurrentWindow">Export Current Window</button>
-    <button id="exportAllWindows">Export All Windows</button>
-    <button id="viewSavedExports">View Saved Exports</button>
+    <button id="exportCurrentWindow">Save Current Window</button>
+    <button id="exportAllWindows">Save All Windows</button>
+    <button id="viewSavedExports">View Saved URLs</button>
+    <button id="resetData" class="reset-btn">Reset All Data</button>
 
     <div id="status" class="status"></div>
   </div>

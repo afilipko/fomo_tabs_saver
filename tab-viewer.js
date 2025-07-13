@@ -2,16 +2,15 @@ class TabViewer {
     constructor() {
         this.tabData = [];
         this.filteredData = [];
-        this.currentSort = { field: null, direction: 'asc' };
+        this.currentSort = { field: 'lastSeen', direction: 'desc' };
+        this.tabStorage = new TabStorage();
         
         this.initializeElements();
         this.bindEvents();
+        this.loadFromIndexedDB();
     }
 
     initializeElements() {
-        this.fileInput = document.getElementById('jsonFile');
-        this.fileName = document.getElementById('fileName');
-        this.currentFile = document.getElementById('currentFile');
         this.searchInput = document.getElementById('searchInput');
         this.categoryFilter = document.getElementById('categoryFilter');
         this.domainFilter = document.getElementById('domainFilter');
@@ -21,14 +20,28 @@ class TabViewer {
         this.noDataMessage = document.getElementById('noDataMessage');
         this.tabTable = document.getElementById('tabTable');
         this.tabTableBody = document.getElementById('tabTableBody');
+        this.statsContainer = document.getElementById('statsContainer');
+        this.refreshBtn = document.getElementById('refreshBtn');
+        this.exportBtn = document.getElementById('exportBtn');
+        this.clearBtn = document.getElementById('clearBtn');
     }
 
     bindEvents() {
-        this.fileInput.addEventListener('change', (e) => this.handleFileLoad(e));
         this.searchInput.addEventListener('input', () => this.applyFilters());
         this.categoryFilter.addEventListener('change', () => this.applyFilters());
         this.domainFilter.addEventListener('change', () => this.applyFilters());
-        this.sentimentFilter.addEventListener('change', () => this.applyFilters());
+        
+        if (this.refreshBtn) {
+            this.refreshBtn.addEventListener('click', () => this.loadFromIndexedDB());
+        }
+        
+        if (this.exportBtn) {
+            this.exportBtn.addEventListener('click', () => this.exportData());
+        }
+        
+        if (this.clearBtn) {
+            this.clearBtn.addEventListener('click', () => this.clearAllData());
+        }
 
         // Bind sort events
         document.querySelectorAll('[data-sort]').forEach(header => {
@@ -39,78 +52,68 @@ class TabViewer {
         });
     }
 
-    async handleFileLoad(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
+    async loadFromIndexedDB() {
         this.showLoading();
-        this.fileName.textContent = file.name;
-        this.currentFile.textContent = file.name;
-
+        
         try {
-            const text = await file.text();
-            const jsonData = JSON.parse(text);
+            await this.tabStorage.init();
+            this.tabData = await this.tabStorage.getAllUrls({ sortBy: 'lastSeen', sortOrder: 'desc' });
             
-            // Handle different JSON structures
-            this.tabData = this.processJsonData(jsonData);
+            if (this.tabData.length === 0) {
+                this.showNoData();
+                return;
+            }
+            
             this.populateFilters();
             this.applyFilters();
             this.showTable();
+            this.displayStats();
         } catch (error) {
-            console.error('Error loading JSON:', error);
-            alert('Error loading JSON file. Please check the format.');
+            console.error('Error loading data from IndexedDB:', error);
             this.showNoData();
+            alert('Error loading saved URLs from local storage: ' + error.message);
         }
     }
 
-    processJsonData(jsonData) {
-        let tabs = [];
-
-        // Handle different JSON structures
-        if (Array.isArray(jsonData)) {
-            tabs = jsonData;
-        } else if (jsonData.tabs && Array.isArray(jsonData.tabs)) {
-            tabs = jsonData.tabs;
-        } else if (jsonData.exportedTabs && Array.isArray(jsonData.exportedTabs)) {
-            tabs = jsonData.exportedTabs;
-        } else {
-            // Try to find any array property that might contain tab data
-            for (const key in jsonData) {
-                if (Array.isArray(jsonData[key]) && jsonData[key].length > 0) {
-                    tabs = jsonData[key];
-                    break;
-                }
+    async displayStats() {
+        try {
+            const stats = await this.tabStorage.getStats();
+            
+            if (this.statsContainer) {
+                this.statsContainer.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-number">${stats.totalUrls}</div>
+                            <div class="stat-label">Total URLs</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${stats.uniqueDomains}</div>
+                            <div class="stat-label">Domains</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${stats.uniqueCategories}</div>
+                            <div class="stat-label">Categories</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${stats.totalAccesses}</div>
+                            <div class="stat-label">Total Visits</div>
+                        </div>
+                    </div>
+                    <div class="top-lists">
+                        <div class="top-domains">
+                            <h4>Top Domains</h4>
+                            ${stats.topDomains.map(item => `<div>${item.domain} (${item.count})</div>`).join('')}
+                        </div>
+                        <div class="top-categories">
+                            <h4>Top Categories</h4>
+                            ${stats.topCategories.map(item => `<div>${item.category} (${item.count})</div>`).join('')}
+                        </div>
+                    </div>
+                `;
             }
+        } catch (error) {
+            console.error('Error loading stats:', error);
         }
-
-        // Normalize tab data structure
-        return tabs.map(tab => {
-            // Handle different tab data structures
-            const normalizedTab = {
-                title: tab.title || tab.name || 'Untitled',
-                url: tab.url || tab.href || '',
-                domain: tab.domain || (tab.url ? new URL(tab.url).hostname : ''),
-                categories: tab.categories || tab.contentTags?.categories || ['general'],
-                confidence: tab.confidence || tab.contentTags?.confidence || 0,
-                tags: tab.tags || tab.contentTags?.tags || [],
-                description: tab.description || tab.contentTags?.description || null,
-                image: tab.image || tab.contentTags?.image || null,
-                author: tab.author || tab.contentTags?.author || null,
-                publishedDate: tab.publishedDate || tab.contentTags?.publishedDate || null,
-                wordCount: tab.wordCount || tab.contentTags?.wordCount || null,
-                language: tab.language || tab.contentTags?.language || null
-            };
-
-            // Ensure arrays
-            if (!Array.isArray(normalizedTab.categories)) {
-                normalizedTab.categories = [normalizedTab.categories];
-            }
-            if (!Array.isArray(normalizedTab.tags)) {
-                normalizedTab.tags = [normalizedTab.tags];
-            }
-
-            return normalizedTab;
-        }).filter(tab => tab.url); // Filter out tabs without URLs
     }
 
     populateFilters() {
@@ -185,6 +188,12 @@ class TabViewer {
             if (Array.isArray(aVal)) aVal = aVal.join(', ');
             if (Array.isArray(bVal)) bVal = bVal.join(', ');
 
+            // Handle dates
+            if (field === 'lastSeen' || field === 'firstSeen') {
+                aVal = new Date(aVal);
+                bVal = new Date(bVal);
+            }
+
             // Handle strings
             if (typeof aVal === 'string') aVal = aVal.toLowerCase();
             if (typeof bVal === 'string') bVal = bVal.toLowerCase();
@@ -246,10 +255,18 @@ class TabViewer {
             `<div class="author">by ${this.escapeHtml(tab.author)}</div>` : '';
         
         const dateHtml = tab.publishedDate ? 
-            `<div class="date">${this.formatDate(tab.publishedDate)}</div>` : '';
+            `<div class="date">Published: ${this.formatDate(tab.publishedDate)}</div>` : '';
         
         const wordCountHtml = tab.wordCount ? 
             `<div class="word-count">${tab.wordCount} words</div>` : '';
+
+        const accessInfo = `
+            <div class="access-info">
+                <div class="access-count">Visited ${tab.accessCount} time${tab.accessCount > 1 ? 's' : ''}</div>
+                <div class="first-seen">First seen: ${this.formatDate(tab.firstSeen)}</div>
+                <div class="last-seen">Last seen: ${this.formatDate(tab.lastSeen)}</div>
+            </div>
+        `;
 
         return `
             <td>
@@ -257,6 +274,7 @@ class TabViewer {
                 <div class="tab-url">
                     <a href="${tab.url}" target="_blank">${this.escapeHtml(tab.url)}</a>
                 </div>
+                ${accessInfo}
             </td>
             <td>${this.escapeHtml(tab.domain)}</td>
             <td>
@@ -294,18 +312,63 @@ class TabViewer {
         this.loadingMessage.style.display = 'block';
         this.noDataMessage.style.display = 'none';
         this.tabTable.style.display = 'none';
+        if (this.statsContainer) this.statsContainer.style.display = 'none';
     }
 
     showTable() {
         this.loadingMessage.style.display = 'none';
         this.noDataMessage.style.display = 'none';
         this.tabTable.style.display = 'table';
+        if (this.statsContainer) this.statsContainer.style.display = 'block';
     }
 
     showNoData() {
         this.loadingMessage.style.display = 'none';
         this.noDataMessage.style.display = 'block';
         this.tabTable.style.display = 'none';
+        if (this.statsContainer) this.statsContainer.style.display = 'none';
+    }
+
+    async exportData() {
+        try {
+            const format = prompt('Export format (json/csv/markdown/simple):', 'json');
+            if (!format) return;
+
+            const exportData = this.tabStorage.formatUrlsForExport(this.filteredData.length > 0 ? this.filteredData : this.tabData, format);
+            
+            const blob = new Blob([exportData.content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = exportData.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('Export completed successfully!');
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Export failed: ' + error.message);
+        }
+    }
+
+    async clearAllData() {
+        if (!confirm('Are you sure you want to delete ALL saved URLs? This cannot be undone.')) {
+            return;
+        }
+
+        try {
+            await this.tabStorage.clearAllUrls();
+            this.tabData = [];
+            this.filteredData = [];
+            this.showNoData();
+            alert('All saved URLs have been deleted.');
+        } catch (error) {
+            console.error('Clear error:', error);
+            alert('Failed to clear data: ' + error.message);
+        }
     }
 
     formatDate(dateString) {
@@ -316,7 +379,9 @@ class TabViewer {
             return date.toLocaleDateString('en-US', {
                 year: 'numeric',
                 month: 'short',
-                day: 'numeric'
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
             });
         } catch {
             return dateString;

@@ -35,7 +35,7 @@ class ContentTagger {
             console.log(`Skipping metadata extraction for system URL: ${url}`);
           } else {
             console.log(`Attempting to get metadata for tab ${tabId}: ${url}`);
-            
+
             // First check if content script is already available
             let contentScriptReady = false;
             try {
@@ -45,7 +45,7 @@ class ContentTagger {
             } catch (e) {
               console.log(`Content script not available for tab ${tabId}, will try to inject`);
             }
-            
+
             // If content script not ready, try injection or reload
             if (!contentScriptReady) {
               try {
@@ -56,18 +56,18 @@ class ContentTagger {
                 console.log(`Content script injected for tab ${tabId}`);
                 await new Promise(resolve => setTimeout(resolve, 200));
               } catch (injectionError) {
-                console.warn(`Content script injection failed for tab ${tabId}:`, injectionError);
-                
+                console.warn(`Content script injection failed for tab ${tabId} ${url}:`, injectionError);
+
                 // Try reloading the tab to enable content script
                 console.log(`Attempting to reload tab ${tabId} to enable content script`);
                 try {
                   await chrome.tabs.reload(tabId);
                   console.log(`Tab ${tabId} reloaded, waiting for page load...`);
-                  
+
                   // Wait for page to load and content script to initialize
                   await this.waitForTabLoad(tabId);
                   await new Promise(resolve => setTimeout(resolve, 500));
-                  
+
                   console.log(`Tab ${tabId} should now have content script available`);
                 } catch (reloadError) {
                   console.error(`Failed to reload tab ${tabId}:`, reloadError);
@@ -75,12 +75,12 @@ class ContentTagger {
                 }
               }
             }
-            
+
             // Now try to get metadata
             const response = await chrome.tabs.sendMessage(tabId, { action: 'getMetadata' });
-            
+
             console.log(`Response from tab ${tabId}:`, response);
-            
+
             if (response && response.success) {
               metadata = response.metadata;
               enhancedCategories = response.categories || [];
@@ -588,7 +588,7 @@ class ContentTagger {
 
   extractImageUrl(metadata) {
     if (!metadata) return null;
-    
+
     // Priority order for image selection
     const imageSources = [
       metadata.ogData?.image,           // OpenGraph image (highest priority)
@@ -596,7 +596,7 @@ class ContentTagger {
       metadata.ogData?.['image:url'],   // Alternative OpenGraph
       metadata.favicon                 // Favicon as fallback
     ];
-    
+
     // Return the first valid image URL found
     for (const imageUrl of imageSources) {
       if (imageUrl && typeof imageUrl === 'string' && imageUrl.length > 0) {
@@ -611,7 +611,7 @@ class ContentTagger {
         }
       }
     }
-    
+
     return null;
   }
 
@@ -662,6 +662,7 @@ class ContentTagger {
 
   async waitForTabLoad(tabId) {
     return new Promise((resolve) => {
+      let tries = 20;
       const checkTabStatus = () => {
         chrome.tabs.get(tabId, (tab) => {
           if (chrome.runtime.lastError) {
@@ -669,17 +670,23 @@ class ContentTagger {
             resolve();
             return;
           }
-          
+
           if (tab.status === 'complete') {
             console.log(`Tab ${tabId} finished loading`);
             resolve();
           } else {
-            console.log(`Tab ${tabId} still loading (status: ${tab.status}), waiting...`);
+            if(tries === 0) {
+              console.log(`Tab ${tabId} ${tab.url} failed to load`);
+              resolve();
+              return
+            }
+            console.log(`Tab ${tabId} ${tab.url} still loading (status: ${tab.status}), waiting...`);
+            tries = tries - 1;
             setTimeout(checkTabStatus, 500);
           }
         });
       };
-      
+
       checkTabStatus();
     });
   }
