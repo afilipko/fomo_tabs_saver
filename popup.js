@@ -2,12 +2,14 @@
 document.addEventListener('DOMContentLoaded', function() {
   const exportCurrentBtn = document.getElementById('exportCurrentWindow');
   const exportAllBtn = document.getElementById('exportAllWindows');
+  const exportCurrentTabBtn = document.getElementById('exportCurrentTab');
   const viewSavedBtn = document.getElementById('viewSavedExports');
   const resetBtn = document.getElementById('resetData');
   const statusDiv = document.getElementById('status');
 
   exportCurrentBtn.addEventListener('click', () => exportTabs(false));
   exportAllBtn.addEventListener('click', () => exportTabs(true));
+  exportCurrentTabBtn.addEventListener('click', () => exportCurrentTab());
   viewSavedBtn.addEventListener('click', showSavedExports);
   resetBtn.addEventListener('click', resetAllData);
 
@@ -204,6 +206,77 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     } catch (error) {
       showStatus(`Error opening tab viewer: ${error.message}`, true);
+    }
+  }
+
+  async function exportCurrentTab() {
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        if (chrome.runtime.lastError) {
+          showStatus(`Error: ${chrome.runtime.lastError.message}`, true);
+          return;
+        }
+
+        if (tabs.length === 0) {
+          showStatus('No active tab found', true);
+          return;
+        }
+
+        const currentTab = tabs[0];
+        const downloadFile = getDownloadFile();
+
+        // Filter the current tab (apply same filtering logic)
+        const filterResult = filterTabs([currentTab]);
+        const filteredTabs = filterResult.filtered;
+
+        if (filteredTabs.length === 0) {
+          showStatus('Current tab was filtered out (likely auth/login page)', true);
+          return;
+        }
+
+        try {
+          // Add content tags if possible
+          let tabsToExport = filteredTabs;
+          try {
+            showStatus('Adding content tags...');
+            tabsToExport = await contentTagger.tagMultipleUrls(filteredTabs);
+            showStatus('Content tagging completed');
+          } catch (tagError) {
+            console.warn('Content tagging failed, proceeding without tags:', tagError);
+            showStatus('Proceeding without content tags');
+          }
+
+          // Always save to IndexedDB
+          const results = await tabStorage.saveUrls(tabsToExport, { append: true });
+          
+          // Download file if requested
+          if (downloadFile) {
+            const { content, filename } = formatTabs(tabsToExport);
+            const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            chrome.downloads.download({
+              url: url,
+              filename: filename,
+              saveAs: true
+            }, () => {
+              if (chrome.runtime.lastError) {
+                showStatus(`Download failed: ${chrome.runtime.lastError.message}`, true);
+              } else {
+                showStatus(`Saved current tab & downloaded file`);
+              }
+
+              // Clean up the blob URL
+              URL.revokeObjectURL(url);
+            });
+          } else {
+            showStatus(`Saved current tab to database`);
+          }
+        } catch (dbError) {
+          showStatus(`Database error: ${dbError.message}`, true);
+        }
+      });
+    } catch (error) {
+      showStatus(`Error: ${error.message}`, true);
     }
   }
 
