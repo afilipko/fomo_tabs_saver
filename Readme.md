@@ -1,4 +1,4 @@
-99.9% of work is done by Claude Code, but it works
+99.9% of coding is done by Claude Code, but it works
 
 You just need to load unpacked extension in Chrome.
 Functionality:
